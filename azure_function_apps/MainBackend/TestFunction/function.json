@@ -1,0 +1,25 @@
+﻿{
+  "bindings": [
+    {
+      "name": "provisioningsite",
+      "type": "queueTrigger",
+      "direction": "in",
+      "queueName": "provisioningsite",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "name": "provisioningteam",
+      "queueName": "provisioningteam",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    },
+    {
+      "type": "queue",
+      "name": "UpdateList",
+      "queueName": "updatelistitem",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    }
+  ]
+}

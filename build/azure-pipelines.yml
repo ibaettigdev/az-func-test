@@ -1,0 +1,55 @@
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+name: 'Azure Function Build'
+
+variables:
+  major: 1
+  minor: 1
+  patch: $(Build.BuildID)
+  buildVer: $(major).$(minor).$(Build.BuildID)
+
+pool:
+    name: Hosted Windows 2019 with VS2019
+
+steps:
+#
+# - task: DownloadSecureFile@1
+#   name: appCertificate
+#   displayName: 'Download CA certificate'
+#   inputs:
+#     secureFile: 'pnp-production-cert.pfx'
+# 
+# - task: DownloadSecureFile@1
+#   name: appConf
+#   displayName: 'Download Config File'
+#   inputs:
+#     secureFile: 'bettercollab_production_config.json'
+
+- powershell: |
+   .\build\build_bettercollab_mainbackend.ps1
+  displayName: 'Build and Drop Code Artifact MainBackend'
+
+- powershell: |
+   .\build\build_bettercollab_grooming.ps1
+  displayName: 'Build and Drop Code Artifact Grooming'
+
+- powershell: |
+   .\build\build_bettercollab_request.ps1
+  displayName: 'Build and Drop Code Artifact Request'
+
+#- powershell: |
+#   .\build\build_bettercollab_upssync.ps1
+#  displayName: 'Build and Drop Code Artifact UPSSync'
+#  env:
+#      APP_CERT_PATH: $(appCertificate.secureFilePath)
+#      APP_CONF_PATH: $(appConf.secureFilePath)
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish Artifact: Zipped for use in Deployment'
+  inputs:
+    pathToPublish: '$(Build.ArtifactStagingDirectory)'
+    artifactName: drop1
