@@ -1,23 +1,24 @@
 ﻿{
   "bindings": [
     {
-      "name": "provisioningsite",
-      "type": "queueTrigger",
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
       "direction": "in",
-      "queueName": "provisioningsite",
-      "connection": "AzureWebJobsStorage"
+      "name": "Request",
+      "methods": [
+        "get",
+        "post"
+      ]
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "Response"
     },
     {
       "type": "queue",
-      "name": "provisioningteam",
-      "queueName": "provisioningteam",
-      "connection": "AzureWebJobsStorage",
-      "direction": "out"
-    },
-    {
-      "type": "queue",
-      "name": "UpdateList",
-      "queueName": "updatelistitem",
+      "name": "getData",
+      "queueName": "getdata",
       "connection": "AzureWebJobsStorage",
       "direction": "out"
     }
