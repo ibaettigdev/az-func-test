@@ -1,0 +1,126 @@
+param($Timer)
+
+# Make all non-terminating errors become terminating
+$WarningPreference = 'Continue'
+
+try {
+    $sharedProfilePath = Join-Path $env:HOME 'site/wwwroot/profile.ps1'.
+    if (Test-Path $sharedProfilePath) {
+        . $sharedProfilePath
+        Write-Information "[Get-RequestSPO] :: Loaded Get-ConfigFromEnvironment function from shared profile.ps1"
+    }
+    else {
+        Write-Information "[Get-RequestSPO] :: profile.ps1 not found at $sharedProfilePath" -ErrorAction Stop
+    }
+
+    # Load configuration from environment variables
+    $config = Get-ConfigFromEnvironment
+    $clientId = $env:clientId
+    $tenantId = $env:tenantId
+    $thumbprint = $env:thumbprint
+    $certificateBase64Encoded = $env:certificate
+
+    # Connect to SharePoint Online using PnP PowerShell
+    $rlcon = Connect-PnPOnline -Url "https://$($config.tenant).sharepoint.com/sites/$($config.Sitealias)" -ClientId $clientId -Tenant $tenantId -CertificateBase64Encoded $certificateBase64Encoded -ReturnConnection
+
+    $list = Get-PnPList $config.SPRequestList.ListId -Connection $rlcon
+    if (-not $list) {
+        Write-Information "[Get-RequestSPO] :: Couldn't find List $($config.SPRequestList.ListId)"
+    }
+
+    $items = Get-PnPListItem -List $list -Query "<View><Query><Where><Eq><FieldRef Name='ProvisioningStatus' /><Value Type='Text'>Requested</Value></Eq></Where></Query></View>" -Connection $rlcon
+
+    if ($items -and $items.Count -gt 0) {
+        Write-Information "[Get-RequestSPO] :: Found $($items.Count) items in the list"
+    }
+    else {
+        Write-Information "[Get-RequestSPO] :: No items found with ProvisioningStatus = 'Requested'."
+        return
+    }
+
+    foreach ($item in $items) {
+        $naming = Set-NamingConvention -Body $item
+    
+        $item | Add-Member -MemberType NoteProperty -Name Alias -Value $naming.Alias
+        $item | Add-Member -MemberType NoteProperty -Name Description -Value $naming.Description
+    
+        $templateName = $null
+        if ($item["TemplateId"] -and $item["TemplateId"].LookupValue) {
+            $templateName = $item["TemplateId"].LookupValue
+        }
+        else {
+            Write-Information "[Get-RequestSPO] :: Item ID $($item.Id) has no template name (TemplateId lookup is empty)."
+        }
+    
+        $template = Get-TemplateSettings -templateName $templateName
+        if ($null -eq $template) {
+            Write-Information "[Get-RequestSPO] :: No template or invalid template for item ID $($item.Id)."
+            $listItem = @{ ProvisioningStatus = "Error: Template not found or empty." }
+        }
+        elseif ($template.wstype -eq "M365Group") {
+            Write-Information "[Get-RequestSPO] :: Creating M365 Group for $($item['Title']) with Alias $($naming.Alias)"
+    
+            $createGroupPayload = @{
+                "ID"          = $item.Id
+                "Title"       = $item.Title
+                "Alias"       = $item.Alias
+                "Template"    = $templateName
+                "Description" = $item.Description
+                "FieldValues" = $item.FieldValues
+            }
+    
+            Push-OutputBinding -Name createM365Group -Value $createGroupPayload
+    
+            $listItem = @{
+                ProvisioningStatus = "Provisioning $($template.wstype) started"
+            }
+        }
+        elseif ($template.wstype -eq "CommunicationSite") {
+            Write-Information "[Get-RequestSPO] :: Creating SPO Site for $($item['Title']) with SiteAlias $($naming.Alias)"
+    
+            $createSitePayload = @{
+                "ID"          = $item.Id
+                "Title"       = $item.Title
+                "Alias"       = $item.Alias
+                "Template"    = $templateName
+                "Description" = $item.Description
+                "FieldValues" = $item.FieldValues
+
+            }
+    
+            Push-OutputBinding -Name createComsite -Value $createSitePayload
+    
+            $listItem = @{
+                ProvisioningStatus = "Provisioning $($template.wstype) started"
+            }
+        }
+        else {
+            Write-Information "[Get-RequestSPO] :: No Workspace Type found for $($item['Title'])"
+    
+            $listItem = @{
+                ProvisioningStatus = "Error: No WorkspaceType found"
+            }
+        }
+    
+        $updateListItem = @{
+            "Id"         = $item.Id
+            "list"       = $config.SPRequestList.ListId
+            "itemfields" = $listItem
+        }
+    
+        Push-OutputBinding -Name updateListItem -Value $updateListItem
+    }
+    
+
+    Write-Information "[Get-RequestSPO] :: All requested items processed successfully."
+
+}
+catch {
+    Write-Error ("[Get-RequestSPO] :: Unhandled error: " + $_.Exception.ToString())
+    if ($_.Exception.InnerException) {
+        Write-Error ("[Get-RequestSPO] :: Inner Exception: " + $_.Exception.InnerException.ToString())
+    }
+    throw
+}
+
+

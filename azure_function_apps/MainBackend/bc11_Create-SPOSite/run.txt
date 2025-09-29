@@ -1,0 +1,114 @@
+# Input bindings are passed in via param block.
+param([object] $createcomsite, $TriggerMetadata)
+$queueItem = $createcomsite
+# Write out the queue message and insertion time to the information log.
+Write-Information "[Create-M365Group] :: [Create-M365Group] :: Queue item insertion time: $($TriggerMetadata.InsertionTime)"
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+
+# Load Config from Environmental Variable
+$betterCollabConfig = Get-ConfigFromEnvironment
+
+#Get Template Settings 
+$template = Get-TemplateSettings $queueItem.Template
+$spAdminUrl = "https://" + $bettercollabConfig.tenant + "-admin.sharepoint.com"
+
+Write-Information "[Create-M365Group] :: [Create-M365Group] :: Connect to Site $($queueItem.Alias)"
+try {
+    $cgConnection = Connect-PnPOnline -Url $spAdminUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+}
+catch {
+    Write-Warning "[Create-M365Group] :: [Create-M365Group] :: Error connecting to $spAdminUrl - $($_.Exception.Message)"
+    New-UpdateListItemMessage -Id $queueItem.ID -ProvisioningStatus "Connecting to SPO Admin failed. $($_.Exception.Message)"
+    return
+}
+
+$alias = $queueItem.alias
+$title = $queueItem.title
+$SpSiteUrl = "https://" + $bettercollabConfig.tenant + ".sharepoint.com/sites/" + $alias
+
+#Create Communication Site
+try {
+    $newSite = New-PnPSite -Type CommunicationSite -Url $SpSiteUrl -Title $title -Lcid $bettercollabConfig.language -Description $queueItem.description -Owner $bettercollabConfig.serviceaccount -Connection $cgConnection
+    Write-Information "[Create-M365Group] :: [Create-M365Group] :: Site $SpSiteUrl created"
+}
+catch {
+    Write-Warning "[Create-M365Group] :: [Create-M365Group] :: Error creating Site $SpSiteUrl - $($_.Exception.Message)"
+    New-UpdateListItemMessage -Id $queueItem.ID -ProvisioningStatus "Creating SPO Site failed. $($_.Exception.Message)"
+    return
+}
+
+# Pause 
+Write-Information "[Create-M365Group] :: [Create-M365Group] :: Wait a littlebit for Communication Site creation..."
+Start-Sleep -s 30
+
+#Connect PNPOnline
+try {
+    Connect-PnPOnline -Url $SpSiteUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint 
+    Write-Information "[Create-M365Group] :: try to connect to $SpSiteUrl"
+}
+catch {
+    Write-Warning "[Create-M365Group] :: Error connecting to $SpSiteUrl - $($_.Exception.Message)"
+    New-UpdateListItemMessage -Id $queueItem.ID -ProvisioningStatus "Connecting to SPO Site failed. $($_.Exception.Message)"
+}
+
+# Set Site Permissions
+try {
+    $membersgroup = Get-PnPGroup -AssociatedMemberGroup
+    $visitorsgroup = Get-PNPGroup -AssociatedVisitorGroup
+    $ownersgroup = Get-PNPGroup -AssociatedOwnerGroup
+    
+    $owners = $queueItem.FieldValues.($bettercollabConfig.MandatoryFields.Owner)
+    $members = $queueItem.FieldValues.($bettercollabConfig.MandatoryFields.Member)
+
+    # Add owners
+    $owners | ForEach-Object { Add-PnPGroupMember -LoginName $_.Email -Group $ownersgroup }
+    # Add members
+    $members | ForEach-Object { Add-PnPGroupMember -LoginName $_.Email -Group $membersgroup }
+
+    Write-Information "[Create-M365Group] :: Access Management set with Owners and Members from Request"
+}
+catch {
+    Write-Warning "[Create-M365Group] :: Error setting Site Permissions - $($_.Exception.Message)"
+    New-UpdateListItemMessage -Id $queueItem.ID -ProvisioningStatus "Setting Site Permissions failed. $($_.Exception.Message)"
+    return
+}
+
+
+# Check template for Sensitivity Label and Set Label to Group
+if ($template.SensitivityLabelId) {
+    $SensitivityLabelGUID = [GUID]$template.SensitivityLabelId
+    try {
+        Set-PnPTenantSite -Identity $spSiteUrl -SensitivityLabel $SensitivityLabelGUID | Out-Null
+        Write-Information "[Create-M365Group] :: Sensitivity Label $($template.SensitivityLabel) set to Site $SpSiteUrl"
+    }
+    catch {
+        Write-Information "[Create-M365Group] :: Error setting Sensitivity Label - $($_.Exception.Message)"
+    }
+}
+else {
+    Write-Information "[Create-M365Group] :: No Sensitivity Label in Template found"
+}
+
+Write-Information "[Create-M365Group] :: Push Output to Queue Set SPO Template"
+Push-OutputBinding -Name setSpoTemplate -Value $queueItem
+
+
+# Update List Item with URL
+$Description = $bettercollabConfig.HyperLinkFriendlyNames.SharePoint
+$ListItem = @{
+    "Url" = "$SpSiteUrl, $description"
+} 
+$UpdateListItem = @{
+    "Id"         = $QueueItem.ID
+    "itemfields" = $ListItem
+}
+
+Push-OutputBinding -Name updatelistitem -Value $UpdateListItem
+
+
+

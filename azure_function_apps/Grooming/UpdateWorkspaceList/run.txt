@@ -1,0 +1,145 @@
+# Input bindings are passed in via param block.
+param($Timer, $InputBlob)
+
+# Get the current universal time in the default string format
+if ($Timer.IsPastDue) {
+    Write-Host "PowerShell timer is running late!"
+}
+
+$EXCLUDE_SERVICE_IN_LIST = $true
+
+# Load Config from Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+
+# Write out the queue message and insertion time to the information log.
+Write-Information -Message "Time: $($TriggerMetadata.InsertionTime)"
+
+# Load Environmental Variable
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+$token = Get-GraphAPIToken
+
+try {
+    # Connect PNPOnline and get SPO List
+    Connect-PnPOnline -Url $bettercollabConfig.SPList.SiteURL -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint
+    $list = Get-PnPList $bettercollabConfig.SPList.Name
+
+    $deltatoken = $InputBlob.nextlink
+    Write-Information "Current Delta Token fetched from Blob Storage $($deltatoken)"
+
+    # Check Nextlink value and get delta of Groupchanges
+    if ($deltatoken) {
+        Write-Information "Use Deltatoken from Blob Storage"
+        $groupsdata = Get-AADGroups -Delta $deltatoken -OAuth $token
+        if ($groupsdata.'@odata.deltaLink') {
+            $deltatoken = $groupsdata.'@odata.deltaLink'
+            Write-Host "deltalink"
+        } else {
+            $deltatoken = $groupsdata.'@odata.nextlink'
+            Write-Host "nextlink"
+        }
+    } else {
+        Write-Information "No Deltatoken exists in Blob Storage. Get Groups and create new Deltatoken"
+        $groupsdata = Get-AADGroups -OAuth $token
+    }
+
+    if ($groupsdata.value) {
+    } else {
+        Write-Error "No groups data found"
+    }
+} catch {
+    Write-Error "An error occurred: $_"
+}
+
+try {
+    if ($groupsdata.value) {
+        if ($groupsdata.'@odata.deltaLink') {
+            $deltatoken = $groupsdata.'@odata.deltaLink'
+            write-host "deltalink"
+
+        }
+        else {  
+            $deltatoken = $groupsdata.'@odata.nextlink'
+            write-host "nextlink"
+
+        }
+        $groupIdsWithChanges = [System.Collections.Generic.HashSet[System.String]]$groupsdata.value.id
+
+        $listItems = Get-PnPListItem -List $list
+        $groupIdsInWorkspaceList = [System.Collections.Generic.HashSet[System.String]]$listItems.FieldValues.GroupID
+
+        # Removing all Group ID's that aren't existing in the Workspace List
+        $groupIdsWithChanges.IntersectWith($groupIdsInWorkspaceList)
+
+        foreach ($groupid in $groupIdsWithChanges) {
+            $memberUPNs = [System.Collections.Generic.HashSet[System.String]]::new()
+            $ownerUPNs = [System.Collections.Generic.HashSet[System.String]]::new()
+            $team = Get-MsTeams -GroupID $groupid -OAuth $token
+            $members = Get-AADGroupMember -GroupID $groupid -OAuth $token
+            $owners = Get-AADGroupOwner -GroupID $groupid -OAuth $token
+            foreach ($mail in $members.value.mail) {
+                if ($mail) {
+                    $memberUPNs.Add($mail) >> $null
+                }
+            } 
+            foreach ($mail in $owners.value.mail) {
+                if ($mail) {
+                    $ownerUPNs.Add($mail) >> $null
+                }
+            }
+
+            if ($EXCLUDE_SERVICE_IN_LIST) {
+                $serviceAccountUPN = $bettercollabConfig.serviceaccount
+                $memberUPNs.Remove($serviceAccountUPN) >> $null
+                $ownerUPNs.Remove($serviceAccountUPN) >> $null
+            # $memberUPNs.Remove("sa-keepit@pfyfferpartner.onmicrosoft.com") >> $null
+            }
+
+            # Remove Members who are already Owners to avoid redundancy in Workspace List
+            $memberUPNs.ExceptWith($ownerUPNs)
+
+            # Converting HashSets to Arrays because Set-PnPListItem cannot handle other Collections yet
+            $arrOwnerUPNs = [System.String[]]::new($ownerUPNs.Count)
+            $ownerUPNs.CopyTo($arrOwnerUPNs)
+
+            $arrMemberUPNs = [System.String[]]::new($memberUPNs.Count)
+            $memberUPNs.CopyTo($arrMemberUPNs)
+
+            if($team){
+                if($team.isArchived -eq "true"){
+                    $status = "Archiviert"
+                }
+                    else{
+                    $status = "Aktiv"
+                }
+            }
+                    else{
+                        $status = "Inaktiv"
+                    }
+
+            $ListItemValues = @{
+                "Owner"  = $arrOwnerUPNs
+                "Member" = $arrMemberUPNs
+                "Status" = $status
+            }
+
+            #Connect PNPOnline and get SPO List
+            #Connect-PnPOnline -Url $bettercollabConfig.SPList.SiteURL -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint
+            #$list = Get-PnPList $bettercollabConfig.SPList.Name
+            #Update SP WorkspaceList Item
+            $listItemId = ($listItems | Where-Object { $_.FieldValues.GroupID -eq $groupid } | Select-Object -First 1).Id
+            Write-Host "Update Liste Item with ID $($listItemId)"
+            Set-PnPListItem -List $list -Identity $listItemId -Values $ListItemValues -UpdateType Update
+
+        }
+    }
+} catch {
+    Write-Error "An error occurred: $_"
+}
+
+$value = @{
+    "nextlink" = $deltatoken
+}
+
+Push-OutputBinding -Name outputBlob -Value ($value | ConvertTo-Json)

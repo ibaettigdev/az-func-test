@@ -1,0 +1,148 @@
+# Azure Functions profile.ps1
+#
+# This profile.ps1 will get executed every "cold start" of your Function App.
+# "cold start" occurs when:
+#
+# * A Function App starts up for the very first time
+# * A Function App starts up after being de-allocated due to inactivity
+#
+# You can define helper functions, run commands, or specify environment variables
+# NOTE: any variables defined that are not environment variables will get reset after the first execution
+
+# Authenticate with Azure PowerShell using MSI.
+# Remove this if you are not planning on using MSI or Azure PowerShell.
+
+# Setting Environmental Variables
+#$env:BETTERCOLLAB_TEAMS_SETTINGS_PATH = "/home/site/wwwroot/config/templates/TeamSettings.json"
+
+# Uncomment the next line to enable legacy AzureRm alias in Azure PowerShell.
+# Enable-AzureRmAlias
+
+# You can also define functions or aliases that can be referenced in any of your PowerShell functions.
+
+#Load PnP Powershell Module
+try {
+    Import-Module PnP.PowerShell
+}
+catch {
+    Write-Error -Message "Import PNP Powershell Module failed" -ErrorAction Stop
+}
+
+
+# Function to get template settings
+function Get-TemplateSettings {
+    param([string]$templateName)
+
+    if ([string]::IsNullOrWhiteSpace($templateName)) {
+        Write-Warning "No templateName specified—returning $null."
+        return $null
+    }
+
+    $templatePath = "/home/site/wwwroot/config/templates/$templateName.json"
+    if (!(Test-Path $templatePath)) {
+        Write-Error "Template file not found: $templatePath"
+        return $null
+    }
+
+    try {
+        $jsonTemplate = Get-Content -Raw -Path $templatePath 
+        return $jsonTemplate | ConvertFrom-Json
+    }
+    catch {
+        Write-Error "Error loading template: $templateName. $_"
+        return $null
+    }
+}
+
+
+# Load BetterCollab Config
+try {
+    if (Test-Path "/home/site/wwwroot/config/config.json") {
+        $configContent = Get-Content -Raw -Path "/home/site/wwwroot/config/config.json"
+        if ($configContent -and $configContent.Length -gt 0) {
+            $env:BETTERCOLLAB_CONFIG = $configContent
+            Write-Information "BetterCollab Config initiated successfully."
+        }
+        else {
+            Write-Error "BetterCollab Config file is empty!"
+            exit 1
+        }
+    }
+    else {
+        Write-Error "BetterCollab Config file not found!"
+        exit 1
+    }
+}
+catch {
+    Write-Error "Failed to load BetterCollab Config: $_"
+    exit 1
+}
+
+
+# Function to get config from environment
+function Get-ConfigFromEnvironment {
+    if (-not $env:BETTERCOLLAB_CONFIG) {
+        Write-Error "BETTERCOLLAB_CONFIG is missing or empty!"
+        exit 1
+    }
+    
+    try {
+        $config = $env:BETTERCOLLAB_CONFIG | ConvertFrom-Json
+        return $config
+    }
+    catch {
+        Write-Error "Failed to parse BETTERCOLLAB_CONFIG JSON: $_"
+        exit 1
+    }
+}
+
+# Import Customer Module
+try {
+    Import-Module "$env:HOME/site/wwwroot/Modules/BCCustomer/Customer.psm1"
+    Write-Information "Customer Module imported"
+}
+catch {
+    Write-Error "Import Customer Module failed: $_"
+}
+
+
+function Set-NamingConvention {
+    [CmdletBinding()]
+    param (
+        [Parameter(Position = 0, Mandatory = $true)]
+        [System.Object]
+        $body
+    )
+    process {
+
+        switch ($body.Template) {
+            "Default" {
+                $alias = $body.id + 1000
+                if ($null -eq $body.Description) {
+                    $description = $title
+                }
+                else {
+                    $description = $body.Description
+                }                
+            }
+            Default {
+                $alias = $body.id + 1000
+                if ($null -eq $body.Description) {
+                    $description = $title
+                }
+                else {
+                    $description = $body.Description
+                } 
+            }
+        }
+
+        ######Needed Body Information
+        $ReturnBody = @{
+
+            "Alias"       = $alias
+            "Description" = $description
+
+        } 
+        return $ReturnBody
+    } 
+}  

@@ -1,0 +1,87 @@
+param($Timer, $InputBlob)
+# Log if the function is running late
+if ($Timer.IsPastDue) {
+    Write-Information "PowerShell timer is running late!"
+}
+Write-Information -Message "Time: $($TriggerMetadata.InsertionTime)"
+# Load configuration from environment variables
+$config = Get-ConfigFromEnvironment
+$deltaToken = $InputBlob.nextlinkOwner
+$clientId = $env:clientId
+$tenantId = $env:tenantId
+$thumbprint = $env:thumbprint
+# Load excluded account emails from a JSON file
+$excludedAccountEmails = $config.excludedAccounts.email
+# Get access token for Microsoft Graph API
+$token = Get-GraphAPIToken
+# Connect to SharePoint Online using PnP PowerShell
+$bcConn = Connect-PnPOnline -Url $config.SPList.SiteURL -ClientId $clientId -Tenant $tenantId -Thumbprint $thumbprint -ReturnConnection
+$list = Get-PnPList $config.SPList.Name -Connection $bcConn
+$template = "SPO Site"
+$listItems = Get-PnPListItem -List $list -Query "<View><Query><Where><Eq><FieldRef Name='Template'/><Value Type='Text'>$template</Value></Eq></Where></Query></View>" -PageSize 2000 -Connection $bcConn -ScriptBlock { Param($items) $items.Context.ExecuteQuery() } | ForEach-Object { $_ } 
+foreach ($item in $listItems) {
+    if ($item.FieldValues.Status -eq "Active") {
+        $ownerUPNs = [System.Collections.Generic.HashSet[System.String]]::new()
+        $owners = $null
+        $siteConn = Connect-PnPOnline -Url $item.FieldValues.Url.Url -ClientId $clientId -Tenant $tenantId -Thumbprint $thumbprint -ReturnConnection
+        Write-Information "Check Site: $($item.FieldValues.Url.Url)" 
+        $ogrp = Get-PnPGroup -AssociatedOwnerGroup -Connection $siteConn
+        $ow1 = Get-PnPGroupMember -Identity $ogrp -Connection $siteConn
+        foreach ($ow in $ow1) {
+            if ($ow.PrincipalType -eq "User") {
+                $ownerUPNs.Add($ow.Email) >> $null
+            }
+            else {
+                if ($ow.Email) {    
+                    $al = $ow.Email.Split("@")[0]
+                    $group = (Get-AADGroupwithAlias -alias $al -OAuth $token).value
+                }
+                else {
+                    $grpid = $ow.LoginName.Replace("c:0t.c|tenant|", "")
+                    $group = Get-AADGroup -GroupID $grpid -OAuth $token
+                }
+                $owners = (Get-AADGroupMember -GroupID $group.id -OAuth $token).value
+                foreach ($mail in $owners.mail) {
+                    if ($mail) {
+                        $ownerUPNs.Add($mail) >> $null
+                    }
+                }
+            }
+        }
+        $realOwners = $ownerUPNs | Where-Object { $_ -notin $excludedAccountEmails }    
+        $warningValue = ""
+        $warningStatus = ""
+        if ($realOwners) {
+            if ($realOwners.Count -ge 2) {
+                $warningStatus = "OK"
+                $warningValue = "Compliant"
+            }
+            else {
+                $warningStatus = "Warning: only One Owner"
+                $warningValue = "This Site has only one owner, please add another owner to ensure continuity of ownership."
+            }
+        }
+        else {
+            $warningStatus = "Warning: No Owner"
+            $warningValue = "This Site has no owner, please add two owner to ensure continuity of ownership."
+        }
+        if ($item.FieldValues.OwnerPolicyStatus -ne $WarningStatus) {
+            try {
+                $body = @{
+                    "OwnerPolicyStatus" = $WarningStatus
+                    "Warning"           = $warningValue
+                    "LastChecked"       = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+                }
+                Set-PnPListItem -List $List -Identity $item.Id -Values $body -UpdateType Update
+            }
+            catch {
+                Write-Warning $_.Exception.Message
+            }
+        }
+        else {
+            Write-Information "No Change in WarningStatus"
+        }
+    }
+    else { Write-Information "Site is not Active" }  
+}
+

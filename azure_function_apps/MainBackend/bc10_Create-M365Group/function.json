@@ -1,0 +1,25 @@
+﻿{
+  "bindings": [
+    {
+      "name": "createM365Group",
+      "type": "queueTrigger",
+      "direction": "in",
+      "queueName": "createm365group",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "name": "setSpoTemplate",
+      "queueName": "setspotemplate",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    },
+    {
+      "type": "queue",
+      "name": "updateListItem",
+      "queueName": "updatelistitem",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    }
+  ]
+}

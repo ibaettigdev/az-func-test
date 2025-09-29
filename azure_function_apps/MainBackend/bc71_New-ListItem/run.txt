@@ -1,0 +1,45 @@
+# Input bindings are passed in via param block.
+param([object] $newListItem, $TriggerMetadata)
+
+# Load Config from Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+
+# Write out the queue message and insertion time to the information log.
+Write-Information "[New-ListItem] :: PowerShell queue trigger function processed work item: $newListItem"
+Write-Information "[New-ListItem] :: Queue item insertion time: $($TriggerMetadata.InsertionTime)"
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+
+#Connect PNPOnline
+Connect-PnPOnline -Url $bettercollabConfig.SPList.SiteURL -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint | Out-Null
+
+$list = Get-PnPList $bettercollabConfig.SPList.Name
+
+$ListItemValues = @{
+   "Title"      = $newListItem.Title
+   "Kategorie"  = $newListItem.Kategorie
+   "Alias"      = $newListItem.Alias
+   "Owner"      = $newListItem.Owner
+   "Member"     = $newListItem.Member
+   "Visibility" = $newListItem.Visibility
+} 
+ 
+#New SP List Item
+$newitem = Add-PnPListItem -List $list -Values $ListItemValues
+
+$queueItem = @{ 
+   "Id"         = $newitem.Id
+   "Title"      = $newListItem.Title
+   "Kategorie"  = $newListItem.Kategorie
+   "Alias"      = $newListItem.Alias
+   "Owner"      = $newListItem.Owner
+   "Member"     = $newListItem.Member
+   "Visibility" = $newListItem.Visibility
+} 
+Push-OutputBinding -Name creategroup -Value $queueItem
+
+

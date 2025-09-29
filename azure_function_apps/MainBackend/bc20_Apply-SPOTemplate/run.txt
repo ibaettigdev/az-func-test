@@ -1,0 +1,76 @@
+#Input bindings are passed in via param block.
+param([object] $setSpoTemplate, $TriggerMetadata)
+$QueueItem = $setSpoTemplate
+# Write out the queue message and insertion time to the information log.
+Write-Information "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Template: $($QueueItem.Template)"
+
+#Get Template Settings 
+$template = Get-TemplateSettings $queueItem.Template
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+$SpSiteUrl = "https://" + $bettercollabConfig.tenant + ".sharepoint.com/sites/" + $QueueItem.Alias
+
+#Connect PNPOnline
+Write-Information "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Connect to Site $($QueueItem.Alias)"
+$spositeconn = Connect-PnPOnline -Url $SpSiteUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+
+try {
+    Write-Information "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Deploy PNP Template"
+    $templatepath = "C:\home\site\wwwroot\config\templates\$($template.spoTemplate)"
+    Invoke-PnPSiteTemplate -Path $templatepath -Connection $spositeconn
+}
+catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+
+
+#Create Folder Structur
+try {
+    Set-FolderStructure -Connection $spositeconn -Body $template
+    Write-Information "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Folder Structure created"
+}
+catch {
+    Write-Warning "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Error creating Folder Structure - $($_.Exception.Message)"
+}
+
+#Enable Sharing on Site
+try {
+    Write-Information "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Set Sharing Permission"
+    Set-PNPSite -Identity $SpSiteUrl -SharingCapability $template.SharingCapability -Connection $spositeconn | Out-Null
+
+    if ($template.SiteSharingCapability) {
+        Write-Information "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Set Site Sharing Capability"
+        $web = Get-PnPWeb -Includes $template.SiteSharingCapability -Connection $spositeconn
+        $web.MembersCanShare = $true
+        $web.Update()
+        $web.Context.ExecuteQuery()
+    }
+}
+catch {
+    Write-Warning "[Apply-SPOTemplate] :: [Apply-SPOTemplate] :: Error setting Sharing Permission - $($_.Exception.Message)"
+}
+
+
+#Connect to Hub
+if ($template.HubUrl) {
+    try {
+        Write-Information "[Apply-SPOTemplate] :: Connect to Hub"
+        Add-PnPHubSiteAssociation -HubSite $template.HubUrl -Site $SpSiteUrl -Connection $spositeconn
+    }
+    catch { Write-Warning "[Apply-SPOTemplate] :: Error connecting to Hub Site - $($_.Exception.Message)" }
+}
+else {
+    Write-Information "[Apply-SPOTemplate] :: No Hub Site in Template"
+}
+
+#Check if workspace is teamify in template
+if ($template.Teamify -eq "true") {
+    try {
+        #Push Queueitem to next Function provisioningteam
+        Write-Information "[Apply-SPOTemplate] :: Teamify Workspace - Start Teams Provisioning"
+        Push-OutputBinding -Name provisioningteam -Value $queueItem
+    }
+    catch { Write-Warning "[Apply-SPOTemplate] :: Error provisioning Teams - $($_.Exception.Message)" }
+}

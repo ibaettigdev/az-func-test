@@ -1,0 +1,133 @@
+param($Timer, $InputBlob)
+# Log if the function is running late
+if ($Timer.IsPastDue) {
+    Write-Host "PowerShell timer is running late!"
+}
+
+Write-Information -Message "Time: $($TriggerMetadata.InsertionTime)"
+# Load configuration from environment variables
+$config = Get-ConfigFromEnvironment
+$deltaToken = $InputBlob.nextlink
+$clientId = $env:clientId
+$tenantId = $env:tenantId
+$thumbprint = $env:thumbprint
+
+# Load excluded account emails from a JSON file
+$excludedAccountEmails = $config.excludedAccounts.email
+
+# Get access token for Microsoft Graph API
+$token = Get-GraphAPIToken
+
+# Connect to SharePoint Online using PnP PowerShell
+Connect-PnPOnline -Url $config.SPList.SiteURL -ClientId $clientId -Tenant $tenantId -Thumbprint $thumbprint
+$list = Get-PnPList $config.SPList.Name
+
+#Check Nextlink value and get delta of Groupchanges
+if ($deltatoken) {
+    Write-Information "Use Deltatoken from Blob Storage"
+    $groupsdata = Get-AADGroups -Delta $deltatoken -OAuth $token
+    if ($groupsdata.'@odata.deltaLink') {
+        $deltatoken = $groupsdata.'@odata.deltaLink'
+        write-host "deltalink"
+
+    }
+    else {  
+        $deltatoken = $groupsdata.'@odata.nextlink'
+        write-host "nextlink"
+
+    }
+}
+else {
+    Write-Information "No Deltatoken exists in Blob Storage. Get Groups and create new Deltatoken"
+    $groupsdata = Get-AADGroups -OAuth $token
+}
+
+if ($groupsdata.value) {
+    if ($groupsdata.'@odata.deltaLink') {
+        $deltatoken = $groupsdata.'@odata.deltaLink'
+        write-host "deltalink"
+
+    }
+    else {  
+        $deltatoken = $groupsdata.'@odata.nextlink'
+        write-host "nextlink"
+
+    }
+
+    $groupIdsWithChanges = [System.Collections.Generic.HashSet[System.String]]$groupsdata.value.id
+
+    
+# Connect to SharePoint Online using PnP PowerShell
+    Connect-PnPOnline -Url $config.SPList.SiteURL -ClientId $clientId -Tenant $tenantId -Thumbprint $thumbprint
+    $list = Get-PnPList $config.SPList.Name
+    $listItems = Get-PnPListItem -List $list -PageSize 2000 -ScriptBlock { Param($items) $items.Context.ExecuteQuery() } | ForEach-Object { $_ } 
+    write-information "List Items: $($listItems.Count)"
+    $groupIdsInWorkspaceList = [System.Collections.Generic.HashSet[System.String]]$listItems.FieldValues.GroupID
+
+    # Removing all Group ID's that aren't existing in the Workspace List
+    $groupIdsWithChanges.IntersectWith($groupIdsInWorkspaceList)
+
+    Write-Information "GroupIds with Changes: $($groupIdsWithChanges.Count)"
+
+    $groupIdsWithChanges | ForEach-Object -Parallel {
+        Import-Module C:\home\site\wwwroot\Modules\BetterCollab.psm1
+        <# try {
+        C:\home\site\wwwroot\Modules\functions\Get-AADGroupOwner.ps1
+    }
+    catch {
+        Write-Warning "Error loading Get-AADGroupOwner: $($_.Exception.Message)" 
+    } #>
+        $groupId = $_
+        try {
+            $listItem = Get-PnPListItem -List $using:list -Query "<View><Query><Where><Eq><FieldRef Name='GroupID'/><Value Type='Text'>$groupId</Value></Eq></Where></Query></View>"  
+        } 
+        catch {
+            Write-Warning $_.Exception.Message
+        } 
+        try {
+            $owners = Get-AADGroupOwner -GroupID $groupid -OAuth $using:token
+            $ownersEmails = $owners.value.mail
+        } 
+        catch {
+            Write-Warning $_.Exception.Message
+        }
+        Write-Information "Group: $groupId"
+        Write-Information "Owners: $($ownersEmails -join ',')"
+        $realOwners = $ownersEmails | Where-Object { $_ -notin $using:excludedAccountEmails }    
+        $warningValue = ""
+        $warningStatus = ""
+        if ($realOwners) {
+            if ($realOwners.Count -ge 2) {
+                $warningStatus = "OK"
+                $warningValue = "Compliant"
+            }
+            else {
+                $warningStatus = "Warning: only One Owner"
+                $warningValue = "This Group has only one owner, please add another owner to ensure continuity of ownership."
+            }
+        }
+        else {
+            $warningStatus = "Warning: No Owner"
+            $warningValue = "This Group has no owner, please add two owner to ensure continuity of ownership."
+        }
+        if ($listItem.FieldValues.OwnerPolicyStatus -ne $WarningStatus) {
+            try {
+                $body = @{
+                    "OwnerPolicyStatus" = $WarningStatus
+                    "Warning"           = $warningValue
+                    "LastChecked"       = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+                }
+                Set-PnPListItem -List $using:list -Identity $listItem.Id -Values $body -UpdateType Update
+            }
+            catch {
+                Write-Warning $_.Exception.Message
+            }
+        }
+    }
+}
+## send an email to the admin in case of an error ##
+
+$value = @{
+    "nextlink" = $nextDeltaToken
+}
+Push-OutputBinding -Name outputBlob -Value ($value | ConvertTo-Json)

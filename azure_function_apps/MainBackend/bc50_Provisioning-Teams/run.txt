@@ -1,0 +1,191 @@
+# Input bindings are passed in via param block.
+param([object] $provisioningteam, $TriggerMetadata)
+$queueItem = $provisioningteam
+# Write out the queue message and insertion time to the information log.
+Write-Information "[Provisioning-Team] :: $($queueItem.Title)"
+Write-Information "[Provisioning-Team] :: Template: $($queueItem.Template)"
+
+#Get Template Settings 
+$bettercollabConfig = Get-ConfigFromEnvironment
+$template = Get-TemplateSettings $queueItem.Template
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+$spAdminUrl = "https://$($bettercollabConfig.tenant)-admin.sharepoint.com"
+
+#Connect PNPOnline
+Write-Information "[Provisioning-Team] :: Connect to Site $spAdminUrl"
+$admin = Connect-PnPOnline -Url $spAdminUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+
+#Get Group
+try {
+    $Group = Get-PnPMicrosoft365Group -Identity $queueItem.Alias -Connection $admin
+    $groupid = $Group.id 
+    Write-Information "[Provisioning-Team] :: Group found: $($Group.displayName) with ID: $groupid"
+}
+catch {
+    Write-Error -Message "No M365 Group found" 
+}
+
+if ($groupid) {
+    #Check if Teams exist
+    try {
+        Write-Information "[Provisioning-Team] :: Check if Team already exist"
+        $teams = Get-PnPTeamsTeam -Identity $queueItem.Alias -Connection $admin -ErrorAction Stop
+    }
+    catch { Write-Error -Message "No MS Teams Team found" }
+
+    if ($teams) {
+        Write-Information "[Provisioning-Team] :: Team already exist"
+    }
+    else {
+
+        try {
+            Add-PnPMicrosoft365GroupMember -Identity $groupid -User $bettercollabConfig.serviceaccount -Connection $admin
+            Write-Information "[Provisioning-Team] :: Service user added to group"
+        }
+        catch {
+            Write-Waring "Service user could not be added to the group. Trying to continue script anyway"
+        }
+        do {
+            $trycount++
+            $settingspath = "C:\home\site\wwwroot\config\templates\$($template.TeamsConfig.TeamSettingsFile)"
+            Write-Information "[Provisioning-Team] :: Try to create Team with Setting File: $settingspath"
+            try {
+                $teams = New-PNPTeamsTeam -GroupId $groupid -Connection $admin -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Team creation failed. Try again in 10 seconds"
+                Start-Sleep -s 10
+            }
+        } until ($null -ne $teams.id -or $trycount -gt 2)
+        #team creation
+        if ($teams) {
+            Write-Information "[Provisioning-Team] :: Team creation started successfully "
+            Write-Information "[Provisioning-Team] :: Wait a little bit for MS Teams creation... *schnarch*"
+            Start-Sleep -s 10
+        }
+        else {
+            Write-Error -Message "Team creation failed"
+        }
+    }
+    foreach ($channel in $template.TeamsConfig.Channels) {
+        switch ($channel.Name) {
+            General {  
+                $general = Get-PnPTeamsChannel -Team $teams -Identity "General" -Connection $admin #Get-MsTeamsChannel -GroupID $groupid -OAuth $token -Channel "Primary"
+                if ($general) {
+                    Write-Information "[Provisioning-Team] :: Channel found"
+                    $tabs = Get-PnPTeamsTab -Team $teams -Channel $general -Connection $admin #Get-MsTeamsTabs -GroupID $groupid -Channel $general.id -OAuth $token 
+                    foreach ($tab in $channel.Tabs) {
+                        $existingtab = $tabs | Where-Object { $_.displayName -eq $tab.Name }
+                        if ($existingtab) {
+                            Write-Information "[Provisioning-Team] :: $($tab.Name) Tab bereits vorhanden"
+                        }
+                        else {
+                            Write-Information "[Provisioning-Team] :: Tab not found: $($tab.Name)"
+                            if ($tab.Type -eq "Planner") {
+                                try {
+                                    $plan = Get-PnPPlannerPlan -Group $queueItem.Alias  #Get-PlannerPlan -GroupID $groupid -OAuth $token 
+                                }
+                                catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+                                if ($plan) {
+                                    try {
+                                        Add-PNPTeamsTab -Team $teams -Channel $general -DisplayName $tab.Name -Type Planner -ContentUrl "https://tasks.office.com/plusarchitekten.onmicrosoft.com/Home/PlannerFrame?page=7&planId=$($plan.Id)" -Connection $admin
+                                    }
+                                    catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+                                }
+                            }           
+                            elseif ($tab.Type -eq "Website") {
+                                $medienurl = "https://plusarchitekten.sharepoint.com/sites/$($queueItem.Alias)/Medien/Forms/Thumbnails.aspx"
+                                Add-PnPTeamsTab -Team $teams -Channel $general -DisplayName "Medien" -Type WebSite -ContentUrl $medienurl -Connection $admin
+                            }
+                            elseif ($tab.Type -eq "DocumentLibrary") {
+                                $cadurl = "https://plusarchitekten.sharepoint.com/sites/$($queueItem.Alias)/Pläne"
+                                Add-PnPTeamsTab -Team $teams -Channel $general -DisplayName "Pläne" -Type DocumentLibrary -ContentUrl $cadurl -Connection $admin
+                            }
+                            else {
+                                Add-PnPTeamsTab -Team $teams -Channel $general -DisplayName $tab.Name -Type $tab.Type -ContentUrl $tab.content -Connection $admin
+                            }
+                        }
+                    }
+                }
+                
+            }
+            Default {    
+                $channel = Get-MsTeamsChannel -GroupID $groupid -OAuth $token -Channel $channel.Name
+                if ($channel) {
+                    Write-Information "[Provisioning-Team] :: Channel already exist"
+                }
+                else {
+                    try {
+                        $channel = Add-MSTeamsChannel -GroupId $groupid -DisplayName $channel.Name -Description $channel.Description -membershipType $channel.membershipType -OAuth $token 
+                        Write-Information "[Provisioning-Team] :: Channel $channel created"
+                    }
+                    catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+                }
+                        
+                if ($channel.id) {
+                    Write-Information "[Provisioning-Team] :: Channel found"
+                    $tabs = Get-MsTeamsTabs -GroupID $groupid -Channel $channel.id -OAuth $token 
+                    foreach ($tab in $channel.Tabs) {
+                        $existingtab = $tabs.value | Where-Object { $_.displayName -eq $tab.Name }
+                        if ($existingtab) {
+                            Write-Information "[Provisioning-Team] :: $($tab.Name) Tab bereits vorhanden"
+                        }
+                        else {
+                            if ($tab.Type -eq "Planner") {
+                                try {
+                                    $plan = Get-PlannerPlan -GroupID $groupid -OAuth $token 
+                                }
+                                catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+
+                                if ($plan) {
+                                    try {
+                                        Add-MsTeamsTabs -GroupID $groupid -Channel $channel.id -TabName $tab.Name -OAuth $token -Type $tab.Type -PlanId $plan.Id -TenantName $bettercollabConfig.tenant
+                                    }
+                                    catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+                                }
+                            }
+                            else {
+                                Add-MsTeamsTabs -GroupID $groupid -Channel $channel.id -TabName $tab.Name -OAuth $token -Type $tab.Type -TenantName $bettercollabConfig.tenant
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #Prepare Body for Listitem update
+    $link = $teams.webUrl 
+    $description = $bettercollabConfig.HyperLinkFriendlyNames.Teams
+    $listItem = @{
+        "TeamsLink"          = "$link, $description"
+        "ProvisioningStatus" = "Team created"
+    } 
+    $updateListItem = @{
+        "Id"         = $provisioningTeam.Id
+        "itemfields" = $listItem
+    }
+    # Send data to Queue for site structure
+    Push-OutputBinding -Name updateListItem -Value $updateListItem
+    Push-OutputBinding -Name setAccess -Value $queueItem
+
+}
+else {
+    Write-Warning "No MS365 Group found - Stop processing"
+    $wListItem = @{
+        "ProvisioningStatus" = "No M365 Group found"
+    } 
+    $updateListItem = @{
+        "Id"         = $provisioningteam.Id
+        "itemfields" = $wListItem
+    }
+    Push-OutputBinding -Name updateListItem -Value $updateListItem
+} 
+
+
+
+

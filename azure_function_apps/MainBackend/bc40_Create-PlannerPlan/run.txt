@@ -1,0 +1,66 @@
+# Input bindings are passed in via param block.
+param([object] $createplannerplan, $TriggerMetadata)
+# Write out the queue message and insertion time to the information log.
+Write-Information -Message "Queue item insertion time: $($TriggerMetadata.InsertionTime)"
+$queueItem = $createplannerplan
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+
+#Get Template Settings 
+#$template = Get-TemplateSettings $queueItem.Template
+$spAdminUrl = "https://$($bettercollabConfig.tenant)-admin.sharepoint.com"
+
+#Connect PNPOnline
+Write-Information -Message "Connect to Site $spAdminUrl"
+$admin = Connect-PnPOnline -Url $spAdminUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+
+#Get Group
+try {
+    $Group = Get-PnPMicrosoft365Group -Identity $queueItem.Alias -Connection $admin
+    $groupid = $Group.id 
+    Write-Information "[Create-PlannerPlan] :: Group found: $($Group.displayName) with ID: $groupid"
+}
+catch {
+    Write-Error -Message "No M365 Group found" 
+}
+
+#Get PlannerName
+try {
+    $plantitle = Set-PlannerPlanTitle -body $queueItem -ErrorAction Stop
+    Write-Information "[Create-PlannerPlan] :: Get Plan Title: $plantitle"
+}
+catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+
+try {
+    $plan = Get-PnPPlannerPlan -Group $queueItem.Alias -Connection $admin
+    Write-Information "[Create-PlannerPlan] :: Check if Plan already exist"
+}
+catch { Write-Information "[Create-PlannerPlan] :: Plan does not exist" }
+
+if ($plan) {
+    Write-Information "[Create-PlannerPlan] :: Plan already exist"
+}
+else {
+    try {
+        $plan = New-PnPPlannerPlan -group $queueItem.Alias -Title $plantitle -Connection $admin
+        Write-Information "[Create-PlannerPlan] :: Plan created"
+    }
+    catch { $theError = $_ ; Write-Warning $theError.Exception.Message }   
+}
+<# 
+#Push Outbinding
+try {
+    Push-OutputBinding -Name provisioningTeam -Value $queueItem
+}
+catch { $theError = $_ ; Write-Warning $theError.Exception.Message }
+
+
+if($template.DefaultPlanner -eq "true") {
+    Write-Information "[Create-PlannerPlan] :: Push Output to Queue Create Planner Plan"
+    Push-OutputBinding -Name createPlannerPlan -Value $queueItem
+}
+ #>

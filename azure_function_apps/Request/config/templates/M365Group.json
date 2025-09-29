@@ -1,0 +1,14 @@
+{   "TemplateName": "MSTeams",
+    "SpoTemplate": "workspace.xml",
+    "CustomTemplateProcess": "false",
+    "Language":"1031",
+    "WsType":"m365Group",
+    "Visibility":"public",
+    "DefaultPlanner": "true",
+    "foldercsv": "folder.csv",
+    "HubUrl" : "https://ckitchen.sharepoint.com/",   
+    "Teamify":"false",
+    "SharingCapability":"ExternalUserAndGuestSharing",
+    "SiteSharingCapability":"MembercanShare",
+    "SensitivityLabel": "asdasdasdasdasd"
+}

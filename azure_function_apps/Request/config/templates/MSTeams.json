@@ -1,0 +1,31 @@
+{   "TemplateName": "MSTeams",
+    "SpoTemplate": "workspace.xml",
+    "CustomTemplateProcess": "false",
+    "Language":"1031",
+    "WsType":"m365Group",
+    "Visibility":"public",
+    "DefaultPlanner": "true",
+    "foldercsv": "folder.csv",
+    "HubUrl" : "https://ckitchen.sharepoint.com/",   
+    "Teamify":"true",
+    "SharingCapability":"ExternalUserAndGuestSharing",
+    "SiteSharingCapability":"MembercanShare",
+    "TeamsConfig": [
+        {
+            "TeamSettingsFile":"TeamSettings.json" ,
+            "Channels": [
+                {
+                    "Name": "General",
+                    "Tabs": [
+                        {
+                            "Name": "Aufgaben",
+                            "Type": "Planner",
+                            "Content": "DefaultPlanner"
+                        }
+                    ] 
+                }
+          ]
+         }
+    ]
+    
+}

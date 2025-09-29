@@ -1,0 +1,74 @@
+# Input bindings are passed in via param block.
+param([object] $setaccess, $TriggerMetadata)
+$QueueItem = $setaccess
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+# Load Config from Environmental Variable
+$betterCollabConfig = Get-ConfigFromEnvironment
+
+#Get Template Settings 
+$template = Get-TemplateSettings $queueItem.Template
+
+$spAdminUrl = "https://" + $bettercollabConfig.tenant + "-admin.sharepoint.com"
+
+Write-Information "[Set-Access] :: Connect to Site $($queueItem.Alias)"
+$cgConnection = Connect-PnPOnline -Url $spAdminUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+
+
+
+
+#########################################################################################################################################
+# NOTE: Members AND OWNERS MUST BE SET DURING GROUP CREATION AS WE DON'T HAVE API PERMISSION TO ADD OWNER/MEMBER AFTER GROUP IS CREATED #
+#########################################################################################################################################
+
+# $groupId = $QueueItem.FieldValues.($bettercollabConfig.MandatoryFields.GroupID)
+# $owners = $queueItem.FieldValues.($bettercollabConfig.MandatoryFields.Owner).Email
+# $members = $queueItem.FieldValues.($bettercollabConfig.MandatoryFields.Member).Email
+
+# Write-Information "[Set-Access] :: GroupID: $groupId"
+# Write-Information "[Set-Access] :: Total Owners: $($owners.Count)"
+# Write-Information "[Set-Access] :: Total Members: $($members.Count)"
+
+# foreach ($owner in $owners) {
+#     Write-Information "[Set-Access] :: Get UserId for $owner"
+#     $UserId = (Get-AADUser -identity $owner -OAuth $token).Id
+#     Write-Information "[Set-Access] :: Add Owner $owner to Team"
+#     Add-GroupMember -GroupID $groupId -UserId $UserId -OAuth $token
+#     Add-GroupOwner -GroupID $groupId -UserId $UserId -OAuth $token
+# }
+
+# foreach ($member in $members) {
+#     Write-Information "[Set-Access] :: Get UserId for $member"
+#     $UserId = (Get-AADUser -identity $member -OAuth $token).Id
+#     Write-Information "[Set-Access] :: Add member $member to Team"
+#     Add-GroupMember -GroupID $groupId -UserId $UserId -OAuth $token
+# }
+
+
+# #Connect PNPOnline
+# Write-Information "[Set-Access] :: Connect to Site $($QueueItem.Alias)"
+# Connect-PnPOnline -Url $SpSiteUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint
+# Remove-PnPMicrosoft365GroupOwner -Identity $QueueItem.GroupID -Users $bettercollabConfig.ServiceAccount
+# Remove-PnPMicrosoft365GroupMember -Identity $QueueItem.GroupID -Users $bettercollabConfig.ServiceAccount
+
+$ListItem = @{
+    "ProvisioningStatus" = "Completed"
+} 
+$UpdateListItem = @{
+    "Id"         = $QueueItem.Id
+    "itemfields" = $ListItem
+}
+
+if ($QueueItem.firstrun -eq "yes") {
+    $QueueItem.firstrun = "no"
+    Push-OutputBinding -Name creategroup -Value $QueueItem
+}
+else {
+    # Send data to Queue for site structure
+    Push-OutputBinding -Name updateListItem -Value $UpdateListItem
+}
+

@@ -1,0 +1,94 @@
+# Input bindings are passed in via param block.
+param($Timer, $InputBlob)
+
+# Get the current universal time in the default string format
+if ($Timer.IsPastDue) {
+    Write-Host "PowerShell timer is running late!"
+}
+
+$EXCLUDE_SERVICE_IN_LIST = $true
+
+# Load Config from Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+
+# Write out the queue message and insertion time to the information log.
+Write-Information -Message "Time: $($TriggerMetadata.InsertionTime)"
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+$token = Get-GraphAPIToken
+
+#Connect PNPOnline and get SPO List
+Connect-PnPOnline -Url $bettercollabConfig.SPList.SiteURL -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+
+# Load excluded account emails from a JSON file
+$excludedAccountEmails = $config.excludedAccounts.email
+# Get access token for Microsoft Graph API
+$token = Get-GraphAPIToken
+# Connect to SharePoint Online using PnP PowerShell
+$bcConn = Connect-PnPOnline -Url $config.SPList.SiteURL -ClientId $clientId -Tenant $tenantId -Thumbprint $thumbprint -ReturnConnection
+$list = Get-PnPList $config.SPList.Name -Connection $bcConn
+$template = "SPO Site"
+$listItems = Get-PnPListItem -List $list -Query "<View><Query><Where><Eq><FieldRef Name='Template'/><Value Type='Text'>$template</Value></Eq></Where></Query></View>" -PageSize 2000 -Connection $bcConn -ScriptBlock { Param($items) $items.Context.ExecuteQuery() } | ForEach-Object { $_ } 
+foreach ($item in $listItems) {
+    $ownerUPNs = [System.Collections.Generic.HashSet[System.String]]::new()
+    $owners = $null
+    $siteConn = Connect-PnPOnline -Url $item.FieldValues.Url.Url -ClientId $clientId -Tenant $tenantId -Thumbprint $thumbprint -ReturnConnection
+    Write-Information "Check Site: $($item.FieldValues.Url.Url)" 
+    $ogrp = Get-PnPGroup -AssociatedOwnerGroup -Connection $siteConn
+    $ow1 = Get-PnPGroupMember -Identity $ogrp -Connection $siteConn
+    foreach ($ow in $ow1) {
+        if ($ow.PrincipalType -eq "User") {
+            if ($ow.UserPrincipalName -like "*#EXT#*") {
+                Write-Information "External User found in Owners"
+            }
+            else {
+                $ownerUPNs.Add($ow.Email) >> $null
+            }
+        }
+        else {
+            if ($ow.Email) {    
+                $al = $ow.Email.Split("@")[0]
+                $group = (Get-AADGroupwithAlias -alias $al -OAuth $token).value
+            }
+            else {
+                $grpid = $ow.LoginName.Replace("c:0t.c|tenant|", "")
+                $group = Get-AADGroup -GroupID $grpid -OAuth $token
+            }
+            $owners = (Get-AADGroupMember -GroupID $group.id -OAuth $token).value
+            foreach ($own in $owners) {  
+                if ($own.UserPrincipalName -like "*#EXT#*") {
+                    Write-Information "External User found in Owners"
+                }
+                else {
+                    $ownerUPNs.Add($own.mail) >> $null
+                } 
+            }
+        }
+    }
+    foreach ($ex in $excludedAccountEmails) {
+        $ownerUPNs.Remove($ex) >> $null
+    }
+
+    # Converting HashSets to Arrays because Set-PnPListItem cannot handle other Collections yet
+    $arrOwnerUPNs = [System.String[]]::new($ownerUPNs.Count)
+    $ownerUPNs.CopyTo($arrOwnerUPNs)
+
+    $ListItemValues = @{
+        "Owner" = $arrOwnerUPNs
+ 
+    }
+
+    $siteinfo = Get-PNPTenantSite -Identity $item.FieldValues.Url.Url -Connection $bcConn
+    if ($siteinfo.LockState -eq "Unlock") {
+        $ListItemValues.Add("Status", "Active")
+    }
+    else {
+        $ListItemValues.Add("Status", "Archive")
+    }
+    Set-PnPListItem -List $list -Identity $item.Id -Values $ListItemValues -UpdateType Update -Connection $bcConn
+
+}

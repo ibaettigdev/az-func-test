@@ -1,0 +1,25 @@
+﻿{
+  "bindings": [
+    {
+      "name": "setaccess",
+      "type": "queueTrigger",
+      "direction": "in",
+      "queueName": "setaccess",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "name": "updatelistitem",
+      "queueName": "updatelistitem",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    },
+    {
+      "type": "queue",
+      "name": "createGroup",
+      "queueName": "creategroup",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    }
+  ]
+}

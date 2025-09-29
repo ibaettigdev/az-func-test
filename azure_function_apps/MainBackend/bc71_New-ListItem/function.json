@@ -1,0 +1,18 @@
+﻿{
+  "bindings": [
+    {
+      "name": "NewListItem",
+      "type": "queueTrigger",
+      "direction": "in",
+      "queueName": "newlistitem",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "name": "createGroup",
+      "queueName": "creategroup",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    }
+  ]
+}

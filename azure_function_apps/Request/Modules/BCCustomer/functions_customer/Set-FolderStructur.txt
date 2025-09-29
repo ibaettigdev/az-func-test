@@ -1,0 +1,36 @@
+<#
+.SYNOPSIS
+Set Naming Convention for your Workspace
+
+.PARAMETER Body
+Required Information for requested Workspace
+
+.EXAMPLE
+PS> Set-NamingConvention -body $queueItem
+
+#>
+function Set-FolderStructure {
+    [CmdletBinding()]
+    param (
+        [Parameter(Position = 0, Mandatory = $true)]
+        [System.Object]
+        $connection,
+        [Parameter(Position = 1, Mandatory = $true)]
+        [System.Object]
+        $body
+    )
+    process {
+        # Ordnerstruktur für "Freigegebene Dokumente" laden
+        $csvPath = Join-Path $env:HOME "site/wwwroot/config/templates/$($body.foldercsv)"
+            
+        
+        $folderStructure1 = Import-Csv -Path $csvPath -Delimiter ';' -Encoding UTF8
+
+        
+        # Ordner in der Dokumentbibliothek "Freigegebene Dokumente" erstellen
+        Write-Information "[Set-FolderStructure] :: Creating folders in 'Freigegebene Dokumente'..."
+        foreach ($folder in $folderStructure1) {
+            Resolve-PNPFolder -SiteRelativePath $folder.Path -Connection $connection | Out-Null
+        }
+    }
+}

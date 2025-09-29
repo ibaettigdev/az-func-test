@@ -1,0 +1,25 @@
+<#
+.SYNOPSIS
+Set Naming Convention for your Workspace
+
+.PARAMETER Body
+Required Information for requested Workspace
+
+.EXAMPLE
+PS> Set-NamingConvention -body $queueItem
+
+#>
+function Set-PlannerPlanTitle {
+    [CmdletBinding()]
+    param (
+        [Parameter(Position = 0, Mandatory = $true)]
+        [System.Object]
+        $body
+    )
+    process {
+
+       $title =  "Aufgaben $($body.Title)"
+
+        return $title
+    }   
+}

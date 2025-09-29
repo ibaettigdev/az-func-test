@@ -1,0 +1,16 @@
+{   "tenant": "ckitchen",
+    "Sitealias": "bcminimal",
+    "language":"1033",
+    "SPRequestList": [
+        {
+            "ListId": "e8069737-1f04-4031-874f-564ff1a6d440",
+            "SiteId": "ckitchen.sharepoint.com,d31faa30-e144-4a6e-ab69-0347985f338f,dba898f6-275f-45c7-a687-0fe865cbb9b9" 
+         }
+    ],
+    "SPInventarList": [
+        {
+            "ListId": "93a43dfe-4940-4c3b-bda0-8f4e397666cb",
+            "SiteId": "ckitchen.sharepoint.com,d31faa30-e144-4a6e-ab69-0347985f338f,dba898f6-275f-45c7-a687-0fe865cbb9b9" 
+         }
+    ]
+}

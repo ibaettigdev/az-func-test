@@ -1,0 +1,11 @@
+{   "TemplateName": "CommunicationSite",
+    "SpoTemplate": "ComSite.xml",
+    "CustomTemplateProcess": "false",
+    "Language":"1031",
+    "WsType":"CommunicationSite",
+    "foldercsv": "folder.csv",
+    "HubUrl" : "https://ckitchen.sharepoint.com/",   
+    "SharingCapability":"ExternalUserAndGuestSharing",
+    "SiteSharingCapability":"MembercanShare",
+    "SensitivityLabel": "asdasdasdasdasd"
+}

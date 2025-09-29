@@ -1,0 +1,5 @@
+﻿# Import all public functions
+foreach ($function in (Get-ChildItem "$PSScriptRoot\functions_customer\*.ps1"))
+{
+	Import-Module $function.FullName
+}

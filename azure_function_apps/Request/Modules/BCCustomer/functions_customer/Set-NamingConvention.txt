@@ -1,0 +1,51 @@
+<#
+.SYNOPSIS
+Set Naming Convention for your Workspace
+
+.PARAMETER Body
+Required Information for requested Workspace
+
+.EXAMPLE
+PS> Set-NamingConvention -body $queueItem
+
+#>
+function Set-NamingConvention {
+    [CmdletBinding()]
+    param (
+        [Parameter(Position = 0, Mandatory = $true)]
+        [System.Object]
+        $body
+    )
+    process {
+
+        switch ($body.Template) {
+            "Default" {
+                $alias = $body.id + 1000
+                if ($null -eq $body.Description) {
+                    $description = $title
+                }
+                else {
+                    $description = $body.Description
+                }                
+            }
+            Default {
+                $alias = $body.id + 1000
+                if ($null -eq $body.Description) {
+                    $description = $title
+                }
+                else {
+                    $description = $body.Description
+                } 
+            }
+        }
+
+        ######Needed Body Information
+        $ReturnBody = @{
+
+            "Alias"       = $alias
+            "Description" = $description
+
+        } 
+        return $ReturnBody
+    } 
+}  

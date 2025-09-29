@@ -16,17 +16,91 @@ if ($env:MSI_SECRET) {
     Connect-AzAccount -Identity
 }
 
-
+#Load BetterCollab Config File
+try {
+    $env:BETTERCOLLAB_CONFIG = Get-Content -Raw -Path C:\home\site\wwwroot\config\config.json
+    Write-Information "BetterCollab Config initiated"
+}
+catch {
+    Write-Log $PSItem.ToString()
+    Write-Error -Message "Import of BetterCollab Config failed" -ErrorAction Stop
+}
 
 #Load PnP Powershell Module
 try {
     Import-Module PnP.PowerShell
-} catch {
+}
+catch {
     Write-Log $PSItem.ToString()
     Write-Error -Message "Import PNP Powershell Module failed" -ErrorAction Stop
 }
 
-# Uncomment the next line to enable legacy AzureRm alias in Azure PowerShell.
-# Enable-AzureRmAlias
+function Get-ConfigFromEnvironment {
+    $config = $env:BETTERCOLLAB_CONFIG | ConvertFrom-Json
+}
 
-# You can also define functions or aliases that can be referenced in any of your PowerShell functions.
+function Get-TemplateSettings {
+    param(
+        [string]$templateName
+    ) 
+    $jsontemplate = Get-Content -Raw -Path "C:\home\site\wwwroot\config\templates\$templateName.json" 
+    $templatedata = $jsontemplate | ConvertFrom-Json
+    return $templatedata
+}
+
+function New-UpdateListItemMessage {
+    param(
+        [string]$Id,
+        [string]$ProvisioningStatus
+    ) 
+    $ListItem = @{
+        "ProvisioningStatus" = $ProvisioningStatus
+    } 
+    $UpdateListItem = @{
+        "Id"         = $Id
+        "itemfields" = $ListItem
+    }
+    return $UpdateListItem
+}
+
+
+function Set-FolderStructure {
+    [CmdletBinding()]
+    param (
+        [Parameter(Position = 0, Mandatory = $true)]
+        [System.Object]
+        $connection,
+        [Parameter(Position = 1, Mandatory = $true)]
+        [System.Object]
+        $body
+    )
+    process {
+        # Ordnerstruktur für "Freigegebene Dokumente" laden
+        $csvPath = Join-Path $env:HOME "site/wwwroot/config/templates/$($body.foldercsv)"
+            
+        
+        $folderStructure1 = Import-Csv -Path $csvPath -Delimiter ';' -Encoding UTF8
+
+        
+        # Ordner in der Dokumentbibliothek "Freigegebene Dokumente" erstellen
+        Write-Information "[Set-FolderStructure] :: Creating folders in 'Freigegebene Dokumente'..."
+        foreach ($folder in $folderStructure1) {
+            Resolve-PNPFolder -SiteRelativePath $folder.Path -Connection $connection | Out-Null
+        }
+    }
+}
+
+function Set-PlannerPlanTitle {
+    [CmdletBinding()]
+    param (
+        [Parameter(Position = 0, Mandatory = $true)]
+        [System.Object]
+        $body
+    )
+    process {
+
+        $title = "Aufgaben $($body.Title)"
+
+        return $title
+    }   
+}

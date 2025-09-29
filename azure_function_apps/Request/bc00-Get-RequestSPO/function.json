@@ -1,0 +1,31 @@
+{
+  "bindings": [
+    {
+      "name": "Timer",
+      "type": "timerTrigger",
+      "direction": "in",
+      "schedule": "0 0 0 * * Sat"
+    },
+    {
+      "type": "queue",
+      "name": "createM365Group",
+      "queueName": "createm365group",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    },
+    {
+      "type": "queue",
+      "name": "createComsite",
+      "queueName": "createcomsite",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    },
+    {
+      "type": "queue",
+      "name": "updateListItem",
+      "queueName": "updatelistitem",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    }
+  ]
+}

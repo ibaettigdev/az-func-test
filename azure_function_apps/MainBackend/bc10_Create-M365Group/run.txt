@@ -1,0 +1,79 @@
+# Input bindings are passed in via param block.
+param([object] $createM365Group, $triggerMetadata)
+$queueItem = $createM365Group
+# Write out the queue message and insertion time to the information log.
+Write-Information "[Create-M365Group] :: [Create-M365Group] :: PowerShell queue trigger function processed work item: $($queueItem.Title)"
+Write-Information "[Create-M365Group] :: [Create-M365Group] :: Queue item insertion time: $($triggerMetadata.InsertionTime)"
+
+# Load Environmental Variable
+$bettercollabConfig = Get-ConfigFromEnvironment
+$bettercollabClientId = $env:clientId
+$bettercollabTenantId = $env:tenantId
+$bettercollabThumbprint = $env:thumbprint
+# Load Config from Environmental Variable
+$betterCollabConfig = Get-ConfigFromEnvironment
+
+#Get Template Settings 
+$template = Get-TemplateSettings $queueItem.Template
+
+$spAdminUrl = "https://" + $bettercollabConfig.tenant + "-admin.sharepoint.com"
+
+Write-Information "[Create-M365Group] :: [Create-M365Group] :: Connect to Site $($queueItem.Alias)"
+$cgConnection = Connect-PnPOnline -Url $spAdminUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+
+# Set owners and members arrays
+$owners = $queueItem.FieldValues.($bettercollabConfig.MandatoryFields.Owner).Email
+$members = $queueItem.FieldValues.($bettercollabConfig.MandatoryFields.Member).Email
+
+Write-Information "[Set-Access] :: Total Owners: $($owners.Count)"
+Write-Information "[Set-Access] :: Total Members: $($members.Count)"
+
+# Check if Group already exists
+try {
+    $group = Get-PnPMicrosoft365Group -Identity $queueItem.Alias -Connection $cgConnection
+}
+catch { Write-Information "[Create-M365Group] :: Group does not exist" }
+
+if ($group) {
+    Write-Information "[Create-M365Group] :: Group already exists: $($group.DisplayName) - Alias: $($group.MailNickname)"
+}
+else {
+    try {
+        Write-Information "[Create-M365Group] :: Group does not exist - Start Provisioning"
+        if ($template.Visibility -eq "Private") {
+
+            New-PnPMicrosoft365Group -DisplayName $queueItem.Title -Description $queueItem.Description -MailNickname $queueItem.Alias -IsPrivate -Owners $owners -Members $members -Connection $cgConnection | Out-Null
+            Write-Information "[Create-M365Group] :: Private Group created"
+        }
+        else {
+            New-PnPMicrosoft365Group -DisplayName $queueItem.Title -Description $queueItem.Description -MailNickname $queueItem.Alias  -Owners $owners -Members $members -Connection $cgConnection | Out-Null
+        }    
+    }
+    catch {
+        Write-Error "[Create-M365Group] :: Error creating Group - $($_.Exception.Message)"
+        return
+    }
+}
+
+#Connect to new created Site 
+$spSiteUrl = "https://" + $betterCollabConfig.tenant + ".sharepoint.com/sites/" + $queueItem.Alias
+$newSiteConnection = Connect-PnPOnline -Url $spAdminUrl -ClientId $bettercollabClientId -Tenant $bettercollabTenantId -Thumbprint $bettercollabThumbprint -ReturnConnection
+
+# Check template for Sensitivity Label and Set Label to Group
+if ($template.SensitivityLabelId) {
+    $SensitivityLabelGUID = [GUID]$template.SensitivityLabelId
+    try {
+        Set-PnPTenantSite -Identity $spSiteUrl -SensitivityLabel $SensitivityLabelGUID -Connection $newSiteConnection    
+    }
+    catch {
+        Write-Warning "[Create-M365Group] :: Error setting Sensitivity Label - $($_.Exception.Message)"
+    }
+}
+else {
+    Write-Warning "[Create-M365Group] :: No Sensitivity Label in Template found"
+}
+
+Write-Information "[Create-M365Group] :: Push Output to Queue Set SPO Template"
+Push-OutputBinding -Name setSpoTemplate -Value $queueItem
+
+

@@ -1,0 +1,18 @@
+﻿{
+  "bindings": [
+    {
+      "name": "createplannerplan",
+      "type": "queueTrigger",
+      "direction": "in",
+      "queueName": "createplannerplan",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "name": "provisioningTeam",
+      "queueName": "provisioningteam",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    }
+  ]
+}
